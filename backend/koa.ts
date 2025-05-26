@@ -63,7 +63,7 @@ router.post('/api/ai-stream', async (ctx) => {
       stream: true  // 启用流式输出
     }, {
       responseType: 'stream',
-      timeout: 30000
+      timeout: 300000
     })
 
     // 将Ollama的流式响应转发给客户端
