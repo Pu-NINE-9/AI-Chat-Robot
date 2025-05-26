@@ -28,8 +28,9 @@ ollamaService.on('exit', (code, signal) => {
 })
 
 // 具体业务代码逻辑
-router.post('/api/ai', async (ctx) => {
-  console.log('Request received:', ctx.request.body) // 打印接收到的请求体
+// 修改后的后端代码（流式输出版本）
+router.post('/api/ai-stream', async (ctx) => {
+  console.log('Request received:', ctx.request.body)
 
   const { prompt } = ctx.request.body
 
@@ -40,33 +41,56 @@ router.post('/api/ai', async (ctx) => {
   }
 
   try {
-    // 发送到 Ollama
-    console.log('Sending to Ollama with prompt:', prompt) // 打印发送到 Ollama 的 prompt
-    const startTime = new Date().getTime() // 记录开始时间
+    console.log('Sending to Ollama with prompt:', prompt)
+    const startTime = new Date().getTime()
 
-    const { data } = await axios.post('http://localhost:11434/api/generate', {
-      model: 'deepseek-r1:8b',
+    // 设置响应头为流式传输
+    ctx.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive'
+    })
+
+    // 创建可写流
+    ctx.body = require('stream').Readable({
+      read() {}
+    })
+
+    // 调用Ollama的流式API
+    const response = await axios.post('http://localhost:11434/api/generate', {
+      model: 'OhHaewon',
       prompt: prompt,
-      stream: false
+      stream: true  // 启用流式输出
     }, {
+      responseType: 'stream',
       timeout: 30000
     })
 
-    const endTime = new Date().getTime() // 记录结束时间
-    console.log(`Ollama responded in ${endTime - startTime}ms`) // 打印响应时间
+    // 将Ollama的流式响应转发给客户端
+    response.data.on('data', (chunk) => {
+      const data = chunk.toString()
+      try {
+        const parsed = JSON.parse(data)
+        if (parsed.response) {
+          ctx.res.write(`data: ${JSON.stringify({ content: parsed.response })}\n\n`)
+        }
+      } catch (e) {
+        console.error('Error parsing chunk:', e)
+      }
+    })
 
-    // 提取 Ollama 响应中的 'response' 字段
-    const aiResponse = data.response
+    response.data.on('end', () => {
+      console.log(`Ollama stream completed in ${new Date().getTime() - startTime}ms`)
+      ctx.res.end()
+    })
 
-    // 返回结果
-    ctx.body = {
-      status: 200,
-      data: aiResponse,
-    }
+    response.data.on('error', (err) => {
+      console.error('Stream error:', err)
+      ctx.res.end()
+    })
 
   } catch (error) {
-    console.error('Error:', error.message) // 打印错误信息
-    console.error('Error details:', error) // 打印错误详细信息
+    console.error('Error:', error.message)
     ctx.status = 500
     ctx.body = {
       error: 'AI 服务暂不可用',
